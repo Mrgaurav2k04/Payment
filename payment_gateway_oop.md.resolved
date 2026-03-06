@@ -1,0 +1,114 @@
+# OOP Concepts in Payment Gateway Design
+
+Designing a flexible payment gateway is a perfect use case for Object-Oriented Programming (OOP). Here is how the four main pillars of OOP map directly to our design, along with a code example in Java/C# style syntax.
+
+## 1. Abstraction
+**Concept:** Hiding complex implementation details and showing only the essential features of the object.
+**Application:** The core system doesn't need to know *how* a Stripe API call works or *how* a UPI intent is generated. It only needs to know that a `processPayment()` action exists. We achieve this using an **Interface**.
+
+```java
+// ABSTRACTION: The core engine only sees this contract.
+public interface IPaymentProcessor {
+    PaymentResponse processPayment(PaymentRequest request);
+    boolean validate(PaymentRequest request);
+}
+```
+
+## 2. Polymorphism
+**Concept:** The ability of different objects to respond to the same method call in their own specific way.
+**Application:** When the core engine calls `processor.processPayment()`, the actual behavior changes dynamically depending on whether the object is a `CreditCardProcessor` or a `UPIProcessor`.
+
+```java
+public class PaymentGatewayService {
+    public void executePayment(IPaymentProcessor processor, PaymentRequest req) {
+        // POLYMORPHISM in action!
+        // If processor is a UPIProcessor, it generates a QR code.
+        // If it's a CreditCardProcessor, it hits the Visa/Mastercard network. 
+        // We don't care which one it is here.
+        PaymentResponse response = processor.processPayment(req);
+    }
+}
+```
+
+## 3. Inheritance
+**Concept:** Creating new classes based on existing ones to promote code reuse.
+**Application:** Many payment methods might share common validation logic (e.g., checking if the amount is greater than zero, or logging the request). We can create an abstract base class that implements `IPaymentProcessor` and handles this shared logic.
+
+```java
+// INHERITANCE: Base class holds common logic
+public abstract class BasePaymentProcessor implements IPaymentProcessor {
+    
+    // Common validation for ALL payment methods
+    public boolean validate(PaymentRequest request) {
+        if (request.getAmount() <= 0) {
+            throw new InvalidAmountException();
+        }
+        return true;
+    }
+    
+    // Abstract method must be implemented by child classes
+    public abstract PaymentResponse processPayment(PaymentRequest request);
+}
+
+// Child class inherits the validate() method, saves repetitive code.
+public class CreditCardProcessor extends BasePaymentProcessor {
+    @Override
+    public PaymentResponse processPayment(PaymentRequest request) {
+        // Specific Stripe/Braintree logic here
+        return new PaymentResponse("SUCCESS", "tx_123");
+    }
+}
+```
+
+## 4. Encapsulation
+**Concept:** Bundling data (variables) and the methods that operate on that data into a single unit (class), and restricting direct access to some components (using private/protected fields).
+**Application:** Sensitive data like a `Transaction` should not be modified directly by random parts of the codebase. We use getters and setters to enforce business rules (e.g., a transaction state cannot go from `SUCCESS` back to `PENDING`).
+
+```java
+public class Transaction {
+    // ENCAPSULATION: Fields are private
+    private String id;
+    private double amount;
+    private PaymentStatus status;
+    
+    public Transaction(double amount) {
+        this.id = UUID.randomUUID().toString();
+        this.amount = amount;
+        this.status = PaymentStatus.PENDING;
+    }
+
+    // Controlled access via getter
+    public PaymentStatus getStatus() {
+        return this.status;
+    }
+
+    // Controlled access via setter with business rules
+    public void markAsSuccess() {
+        if (this.status == PaymentStatus.FAILED) {
+            throw new IllegalStateException("Failed transaction cannot become successful");
+        }
+        this.status = PaymentStatus.SUCCESS;
+    }
+}
+```
+
+## Bonus: The Factory Pattern (Creational OOP)
+To tie it all together, we use a Factory to separate the object *creation* logic from the business logic.
+
+```java
+// Encapsulates the object creation logic based on User Choice
+public class PaymentProcessorFactory {
+    public static IPaymentProcessor getProcessor(String method) {
+        switch (method.toUpperCase()) {
+            case "CREDIT_CARD": 
+                return new CreditCardProcessor();
+            case "UPI": 
+                return new UPIProcessor();
+            case "WALLET": 
+                return new WalletProcessor();
+            default: 
+                throw new UnsupportedPaymentMethodException();
+        }
+    }
+}
+```

@@ -1,0 +1,85 @@
+# Multi-Method Payment Gateway Design
+
+## 1. Architectural Overview
+
+Designing a payment gateway that supports multiple payment methods (Credit Card, Debit Card, UPI, Wallets) requires a flexible, decoupled architecture. The core principle is to isolate the gateway's core logic from the specific integration details of each payment provider.
+
+```mermaid
+graph TD
+    Client[Client App / Web] -->|1. Init Payment| API[API Gateway]
+    API -->|2. Route Request| Core[Payment Core Engine]
+    Core -->|3. Fetch Methods| DB[(Database)]
+    Core -->|4. Select Strategy| Router[Payment Router]
+    
+    Router --> CC[Card Processor Adapter]
+    Router --> UPI[UPI Adapter]
+    Router --> Wallet[Wallet Adapter]
+    
+    CC --> BankA[Bank / Card Network]
+    UPI --> NPCI[NPCI / UPI Switch]
+    Wallet --> Provider[Wallet Provider APIs]
+```
+
+## 2. Core Design Patterns
+
+To allow users to pay through their desired method seamlessly while keeping the codebase maintainable, we heavily rely on the **Strategy Pattern** and the **Factory Pattern**.
+
+* **Strategy Pattern**: Define a common interface (e.g., `IPaymentProcessor`) that all payment methods implement (with methods like `processPayment()`, `refund()`, `validate()`).
+* **Factory Pattern**: Based on the user's selected payment method, a Factory instantiates the correct specific strategy to handle the request.
+
+## 3. Core Components
+
+1. **Checkout UI / SDK**: Displays available/active payment methods to the user, collects necessary details securely, and tokenizes sensitive info (like card numbers).
+2. **API Gateway**: Handles rate limiting, user authentication, and initial request validation.
+3. **Payment Core Service**: 
+   * **State Machine**: Manages the precise lifecycle of a transaction (CREATED $\rightarrow$ PENDING $\rightarrow$ SUCCESS/FAILED $\rightarrow$ REFUNDED).
+   * **Router**: Examines the payment request and routes it to the correct adapter.
+4. **Integration Adapters**: Concrete implementations for each payment method. They translate our internal domain models into the specific API payloads required by external banks/providers.
+5. **Webhook Handler**: Asynchronously receives updates from payment providers (e.g., delayed UPI successes or asynchronous card 3D Secure confirmations) and updates the transaction state.
+
+## 4. High-Level Database Schema
+
+* **Transactions**: 
+  * `id` (UUID), `user_id`, `amount`, `currency`, `status` (Enum), `payment_method_id`, `provider_tx_id`, `created_at`, `updated_at`.
+* **Payment_Methods**: Configurations for enabling/disabling methods based on region or provider availability.
+  * `id`, `name` (e.g., UPI, CC), `is_active`, `provider_credentials`.
+* **Webhooks_Log**: Stores incoming callbacks for idempotency verification, retries, and debugging.
+
+## 5. Security & Compliance Requirements
+
+* **PCI-DSS Compliance**: For handling cards. Ensure card pan/cvv data never hits your servers directly. Use client-side tokenization (via provider SDKs like Stripe Elements or BrainTree).
+* **Idempotency**: Implement Idempotency-Keys on all API endpoints to prevent double charging users if a network request drops and the client retries.
+* **Encryption**: All sensitive data must be encrypted in transit (TLS 1.2+) and at rest (AES-256).
+
+---
+
+## 6. Implementation Roadmap
+
+Here is the step-by-step path to building this system from scratch:
+
+### Phase 1: Requirements & API Contracts
+- Define the universal payment API contract that the frontend will call, regardless of the payment method.
+- Design the database schema for transaction tracking and state management.
+- Establish the webhook API contracts for incoming provider alerts.
+
+### Phase 2: Core Infrastructure
+- Set up the API Gateway and the Payment Core Service scaffolding.
+- Implement the database and the Transaction State Machine.
+- Build the **Factory and Strategy** pattern structure in the code. Create a dummy/mock processor adapter to test the core flow end-to-end without real money.
+
+### Phase 3: Integration Adapters
+- **Iteration 1**: Implement the Credit/Debit Card Adapter (Integrate with a provider like Stripe, Razorpay, or direct Bank APIs).
+- **Iteration 2**: Implement the UPI Adapter. This often involves generating deep links or dynamic QR codes.
+- **Iteration 3**: Implement the Wallet Adapter (e.g., Apple Pay, Google Pay, PayPal).
+- Build the robust Webhook handler to process asynchronous status updates.
+
+### Phase 4: Security Features & Resiliency
+- Ensure card tokenization is fully functional on the frontend.
+- Implement Idempotency checks.
+- Add circuit breakers and retry mechanisms for downstream bank API failures. Add alerting for high failure rates.
+
+### Phase 5: Testing & Go-Live
+- Write comprehensive unit tests for the core engine.
+- Write integration tests across all payment methods using the providers' sandbox/testing environments.
+- Perform load testing to ensure the gateway can handle expected peak traffic.
+- Roll out to a staging environment, then perform a phased rollout to production.

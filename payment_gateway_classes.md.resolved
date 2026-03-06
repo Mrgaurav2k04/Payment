@@ -1,0 +1,94 @@
+# Payment Gateway Core Classes
+
+Here are the primary classes and interfaces needed to build the core payment routing engine we discussed. 
+
+---
+
+## 1. Domain Models (Data Entities)
+
+These classes manage the state and data being passed through the system.
+
+### `PaymentRequest`
+Represents the incoming API payload from the client.
+- `String orderId`
+- `decimal amount`
+- `String currency`
+- `PaymentMethodType methodType` (Enum: CREDIT_CARD, UPI, WALLET)
+- `Map<String, String> paymentDetails` (e.g., card token, UPI ID)
+
+### `PaymentResponse`
+The normalized response sent back to the client after a transaction attempt.
+- `String transactionId`
+- `PaymentStatus status` (Enum: SUCCESS, PENDING, FAILED)
+- `String providerMessage`
+
+### `Transaction`
+The database entity representing a payment attempt.
+- `UUID id`
+- `String orderId`
+- `decimal amount`
+- `PaymentStatus status`
+- `PaymentMethodType methodDetails`
+
+---
+
+## 2. Core Interfaces (Strategy Pattern)
+
+This is the contract that *all* payment methods must obey.
+
+### `IPaymentProcessor` (Interface)
+The universal strategy interface.
+- `PaymentResponse processPayment(PaymentRequest request)`
+- `PaymentResponse validatePayment(PaymentRequest request)`
+- `RefundResponse processRefund(String transactionId, decimal amount)`
+
+---
+
+## 3. Concrete Adapters (The Implementations)
+
+These classes implement `IPaymentProcessor` and contain the logic to talk to specific external APIs.
+
+### `CreditCardProcessorAdapter`
+Implements `IPaymentProcessor` for card networks (e.g., Stripe, Braintree).
+- `PaymentResponse processPayment(PaymentRequest request)`: Calls Stripe API with the card token.
+
+### `UPIProcessorAdapter`
+Implements `IPaymentProcessor` for UPI (e.g., Razorpay, NPCI).
+- `PaymentResponse processPayment(PaymentRequest request)`: Generates a UPI intent link or sends a collect request to a VPA.
+
+### `WalletProcessorAdapter`
+Implements `IPaymentProcessor` for Wallets (e.g., Apple Pay, PayPal).
+- `PaymentResponse processPayment(PaymentRequest request)`: Verifies wallet tokens.
+
+---
+
+## 4. The Orchestrator & Factory
+
+These classes route the request to the correct adapter.
+
+### `PaymentProcessorFactory`
+Examines the `PaymentRequest` and returns the correct `IPaymentProcessor`.
+- `IPaymentProcessor getProcessor(PaymentMethodType methodType)`: 
+  * If `methodType == UPI`, return `new UPIProcessorAdapter()`.
+  * If `methodType == CREDIT_CARD`, return `new CreditCardProcessorAdapter()`.
+
+### `PaymentGatewayService`
+The main entry point called by your API Controllers.
+- `PaymentProcessorFactory factory`
+- `TransactionRepository database`
+- `PaymentResponse executePayment(PaymentRequest request)`:
+  1. Save `Transaction` to DB as `PENDING`.
+  2. Call `factory.getProcessor(request.methodType)`.
+  3. Call `processor.processPayment(request)`.
+  4. Update `Transaction` in DB with SUCCESS/FAILED.
+  5. Return `PaymentResponse`.
+
+---
+
+## 5. Summary
+In a robust initial implementation, you will have roughly **10-12 core classes/interfaces**:
+* **3 Domain Models** (`PaymentRequest`, `PaymentResponse`, `Transaction`)
+* **1 Interface** (`IPaymentProcessor`)
+* **3+ Adapters** (One for each payment method: `CreditCardAdapter`, `UPIAdapter`, `WalletAdapter`)
+* **2 Orchestrators** (`PaymentProcessorFactory`, `PaymentGatewayService`)
+* **1-2 Database Repositories** (e.g., `TransactionRepository`)
